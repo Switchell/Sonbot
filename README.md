@@ -56,10 +56,13 @@ Compose project name: `sonbot` (изолирован от других Docker-п
 
 Файл: `workflows/assistant_chat_llm.workflow.json`
 
-| Что видит клиент (HTTP) | Что происходит внутри |
-|-------------------------|------------------------|
-| `POST http://localhost:5678/webhook/assistant-chat-v1` с JSON-телом | Workflow стартует; ответ приходит **сразу** в режиме асинхронного вебхука (тело вида «workflow started» — штатное поведение n8n для `responseMode: onReceived`). |
-| Ответ модели в том же HTTP-запросе | В этой витринной сборке **не отдаётся** — чтобы обходить нестабильность синхронного `Respond to Webhook` на части установок. |
+Цепочка: **вебхук → нормализация → поиск в Qdrant (`bot_memory`) → LLM с контекстом из памяти → запись диалога в Qdrant → JSON-ответ** (режим `Respond to Webhook`, как в `bot_memory_demo`).
+
+| Шаг | Назначение |
+|-----|------------|
+| Qdrant Search | Вектор как в демо памяти + фильтр по `user_id`; в системный промпт попадают прошлые реплики. |
+| LLM | OpenAI-совместимый `/chat/completions`. |
+| Upsert | В коллекцию пишется пара «сообщение пользователя» + `assistant_reply`. |
 
 **Тело запроса:**
 
@@ -67,7 +70,11 @@ Compose project name: `sonbot` (изолирован от других Docker-п
 { "user_id": "u1", "message": "Привет" }
 ```
 
-**Где смотреть результат от LLM:** в n8n открой **Executions** → последний запуск → выход ноды **Build Response** (`assistant_reply`, `input_message`, `model`). Так можно показать заказчику скрин «цепочка отработала».
+**Ответ в том же HTTP-запросе** (пример полей): `status`, `assistant_reply`, `model`, `used_memory_count`, `latency_ms`, `memory_upsert_ok`.
+
+Перед первым запуском ассистента коллекция **`bot_memory`** должна существовать: один раз прогони `bot_memory_demo` или создай коллекцию вручную в Qdrant. Если поиск по коллекции недоступен, нода поиска помечена `continueOnFail` — ответ всё равно соберётся, но память будет пустой.
+
+Отладка: **Executions** в n8n — цепочка нод от **Webhook Trigger** до **Build API Response**.
 
 **Переменные в `.env` (и в Environment n8n для контейнера):**
 

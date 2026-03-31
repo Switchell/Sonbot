@@ -4,7 +4,7 @@
 
 Сейчас бот технически рабочий; продуктовая полировка продолжается:
 - есть приём webhook и запись памяти в Qdrant (`bot_memory_demo`);
-- есть витринный workflow **Assistant Chat**: `POST /webhook/assistant-chat-v1` → LLM → ответ в ноде **Build Response** (в HTTP ответе вебхука — служебное тело из‑за `onReceived`, см. README);
+- есть витринный workflow **Assistant Chat**: `POST /webhook/assistant-chat-v1` → Qdrant search → LLM → upsert → **JSON в ответе вебхука** (см. README);
 - упаковка для Kwork: `KWORK_OFFERING.md`, чеклист в `DEMO_CHECKLIST.md`.
 
 ## Цель
@@ -24,9 +24,9 @@
 - [x] e2e: вебхук + проверка **Executions**; память — отдельным workflow `bot_memory_demo`
 
 ### Этап 2
-- [ ] Добавить memory retrieval (поиск похожего контекста)
-- [ ] Собрать prompt с историей
-- [ ] Вернуть отладочные поля в ответе (used_memory_count, model, latency)
+- [x] Memory retrieval: Qdrant `points/search` по тому же латентному «вектору», что и в `bot_memory_demo`, фильтр `user_id`
+- [x] Промпт с блоком памяти в system message
+- [x] Поля ответа: `used_memory_count`, `model`, `latency_ms`, `memory_upsert_ok`
 
 ### Этап 3
 - [ ] Telegram trigger + reply
@@ -35,8 +35,9 @@
 
 ## Критерий готовности
 
-**Минимальная витрина (уже есть):** вебхук стартует workflow; AI-текст смотрится в Executions → **Build Response**; память — через `bot-memory-demo`; запуск по README/DEMO_CHECKLIST.
+**Текущая витрина:** один ассистентский workflow с LLM + Qdrant в одной цепочке; синхронный JSON из **Respond to Webhook**; отдельный `bot-memory-demo` по желанию для чистой демонстрации только памяти.
 
-**Следующий критерий «как у продукта в одном запросе»:**
-- `POST /webhook/assistant-chat-v1` (или новый путь) стабильно отдаёт JSON с полем ответа модели в том же HTTP-ответе;
-- опционально объединить LLM + Qdrant в одной цепочке под задачу заказчика.
+**Дальше (этап 3 и идеи):**
+- Telegram и другие каналы;
+- настоящие эмбеддинги вместо демо-вектора из длины строки (если заказчик нужен семантический поиск);
+- rate-limit / антиспам на входе вебхука.

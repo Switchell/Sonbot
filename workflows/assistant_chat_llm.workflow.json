@@ -1,11 +1,11 @@
 {
-  "name": "SonBot — Assistant Chat (Webhook + LLM)",
+  "name": "SonBot — Assistant Chat (LLM + Qdrant memory)",
   "nodes": [
     {
       "parameters": {
         "httpMethod": "POST",
         "path": "assistant-chat-v1",
-        "responseMode": "onReceived",
+        "responseMode": "responseNode",
         "options": {}
       },
       "webhookId": "0af7f353-f6b1-4765-bfa6-afac0bcc40b6",
@@ -13,10 +13,7 @@
       "name": "Webhook Trigger",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [
-        140,
-        260
-      ]
+      "position": [120, 300]
     },
     {
       "parameters": {
@@ -31,6 +28,32 @@
               "name": "message",
               "value": "={{$json.body?.message || $json.message || 'Привет'}}"
             }
+          ],
+          "number": [
+            {
+              "name": "point_id",
+              "value": "={{$now.toMillis()}}"
+            },
+            {
+              "name": "request_started_ms",
+              "value": "={{$now.toMillis()}}"
+            },
+            {
+              "name": "v1",
+              "value": "={{($json.body?.message || $json.message || 'x').length}}"
+            },
+            {
+              "name": "v2",
+              "value": "={{Math.floor((($json.body?.message || $json.message || 'x').length) / 2)}}"
+            },
+            {
+              "name": "v3",
+              "value": "={{($json.body?.user_id || $json.user_id || 'demo-user').length}}"
+            },
+            {
+              "name": "v4",
+              "value": "={{($json.body?.message || $json.message || 'x').split(' ').length}}"
+            }
           ]
         },
         "options": {}
@@ -39,23 +62,43 @@
       "name": "Normalize Input",
       "type": "n8n-nodes-base.set",
       "typeVersion": 2,
-      "position": [
-        380,
-        260
-      ]
+      "position": [340, 300]
     },
     {
       "parameters": {
-        "functionCode": "const llmBody = {\n  model: $env.OPENAI_MODEL || 'gpt-4o-mini',\n  temperature: 0.4,\n  messages: [\n    {\n      role: 'system',\n      content: 'Ты полезный и короткий ассистент для фриланс-бота. Отвечай на русском, конкретно и по делу.'\n    },\n    {\n      role: 'user',\n      content: String($json.message || '')\n    }\n  ]\n};\n\nreturn [{\n  json: {\n    ...$json,\n    llmBodyString: JSON.stringify(llmBody)\n  }\n}];"
+        "functionCode": "const row = $json;\nconst v = [Number(row.v1), Number(row.v2), Number(row.v3), Number(row.v4)];\nconst uid = String(row.user_id || 'demo-user');\nconst searchBody = {\n  vector: v,\n  limit: 6,\n  with_payload: true,\n  with_vector: false,\n  filter: {\n    must: [{ key: 'user_id', match: { value: uid } }],\n  },\n};\nreturn [{ json: { ...row, searchBodyString: JSON.stringify(searchBody) } }];"
       },
-      "id": "Fn_build",
+      "id": "Fn_build_search",
+      "name": "Build Search Body",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [560, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://qdrant:6333/collections/bot_memory/points/search",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json.searchBodyString}}",
+        "options": {}
+      },
+      "continueOnFail": true,
+      "id": "HTTP_qdrant_search",
+      "name": "Qdrant Search Similar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [780, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const norm = $items('Normalize Input', 0, 0)[0].json;\nconst raw = $json.result;\nconst hits = Array.isArray(raw) ? raw : [];\nconst lines = [];\nfor (const h of hits) {\n  const p = h.payload || {};\n  const a = p.assistant_reply ? String(p.assistant_reply).slice(0, 240) : '';\n  const m = p.message ? String(p.message).slice(0, 240) : '';\n  if (m || a) lines.push('- Пользователь: ' + m + (a ? (' | Ассистент: ' + a) : ''));\n}\nconst memBlock = lines.length ? ('Контекст из памяти (прошлые реплики этого user_id):\\n' + lines.join('\\n')) : '';\nconst sys = 'Ты полезный короткий ассистент SonBot. Отвечай на русском, конкретно. Если дали блок памяти — учитывай факты из него, не выдумывай лишнего.\\n\\n' + memBlock;\nconst llmBody = {\n  model: $env.OPENAI_MODEL || 'gpt-4o-mini',\n  temperature: 0.4,\n  messages: [\n    { role: 'system', content: sys },\n    { role: 'user', content: String(norm.message || '') },\n  ],\n};\nreturn [{\n  json: {\n    user_id: norm.user_id,\n    message: norm.message,\n    point_id: norm.point_id,\n    v1: norm.v1,\n    v2: norm.v2,\n    v3: norm.v3,\n    v4: norm.v4,\n    request_started_ms: norm.request_started_ms,\n    llmBodyString: JSON.stringify(llmBody),\n    used_memory_count: hits.length,\n  },\n}];"
+      },
+      "id": "Fn_build_llm",
       "name": "Build LLM Body",
       "type": "n8n-nodes-base.function",
       "typeVersion": 1,
-      "position": [
-        640,
-        260
-      ]
+      "position": [1000, 300]
     },
     {
       "parameters": {
@@ -84,69 +127,84 @@
       "name": "LLM Chat Completion",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        900,
-        260
-      ]
+      "position": [1220, 300]
     },
     {
       "parameters": {
-        "functionCode": "const llm = $json;\nconst content = llm?.choices?.[0]?.message?.content || llm?.error?.message || 'Извини, не удалось получить ответ от модели.';\n\nreturn [{\n  json: {\n    status: 'ok',\n    user_id: $items('Normalize Input', 0, 0)?.[0]?.json?.user_id || null,\n    input_message: $items('Normalize Input', 0, 0)?.[0]?.json?.message || null,\n    assistant_reply: content,\n    model: llm?.model || ($env.OPENAI_MODEL || 'unknown')\n  }\n}];"
+        "functionCode": "const llm = $json;\nconst carry = $items('Build LLM Body', 0, 0)[0].json;\nconst content = llm?.choices?.[0]?.message?.content || (typeof llm?.error?.message === 'string' ? llm.error.message : '') || 'Извини, не удалось получить ответ от модели.';\nconst upsertBody = {\n  points: [\n    {\n      id: Number(carry.point_id),\n      vector: [Number(carry.v1), Number(carry.v2), Number(carry.v3), Number(carry.v4)],\n      payload: {\n        user_id: carry.user_id,\n        message: carry.message,\n        assistant_reply: content,\n        created_at: new Date().toISOString(),\n      },\n    },\n  ],\n};\nreturn [{\n  json: {\n    user_id: carry.user_id,\n    message: carry.message,\n    point_id: carry.point_id,\n    v1: carry.v1,\n    v2: carry.v2,\n    v3: carry.v3,\n    v4: carry.v4,\n    request_started_ms: carry.request_started_ms,\n    used_memory_count: carry.used_memory_count,\n    assistant_reply: content,\n    llm_model: llm?.model || null,\n    upsertBodyString: JSON.stringify(upsertBody),\n  },\n}];"
       },
-      "id": "Fn_response",
-      "name": "Build Response",
+      "id": "Fn_build_upsert",
+      "name": "Build Upsert After LLM",
       "type": "n8n-nodes-base.function",
       "typeVersion": 1,
-      "position": [
-        1140,
-        260
-      ]
+      "position": [1440, 300]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "http://qdrant:6333/collections/bot_memory/points?wait=true",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json.upsertBodyString}}",
+        "options": {}
+      },
+      "continueOnFail": true,
+      "id": "HTTP_upsert",
+      "name": "Upsert Memory",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1660, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const q = $json;\nconst carry = $items('Build Upsert After LLM', 0, 0)[0].json;\nconst t0 = Number(carry.request_started_ms) || Date.now();\nconst upsertOk = q.status === 'ok';\nreturn [{\n  json: {\n    status: 'ok',\n    user_id: carry.user_id,\n    input_message: carry.message,\n    assistant_reply: carry.assistant_reply,\n    model: carry.llm_model || ($env.OPENAI_MODEL || 'unknown'),\n    used_memory_count: carry.used_memory_count,\n    latency_ms: Date.now() - t0,\n    memory_upsert_ok: upsertOk,\n  },\n}];"
+      },
+      "id": "Fn_api_response",
+      "name": "Build API Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1880, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {}
+      },
+      "id": "Respond_assistant",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2100, 300]
     }
   ],
   "connections": {
     "Webhook Trigger": {
-      "main": [
-        [
-          {
-            "node": "Normalize Input",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Normalize Input", "type": "main", "index": 0 }]]
     },
     "Normalize Input": {
-      "main": [
-        [
-          {
-            "node": "Build LLM Body",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Build Search Body", "type": "main", "index": 0 }]]
+    },
+    "Build Search Body": {
+      "main": [[{ "node": "Qdrant Search Similar", "type": "main", "index": 0 }]]
+    },
+    "Qdrant Search Similar": {
+      "main": [[{ "node": "Build LLM Body", "type": "main", "index": 0 }]]
     },
     "Build LLM Body": {
-      "main": [
-        [
-          {
-            "node": "LLM Chat Completion",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "LLM Chat Completion", "type": "main", "index": 0 }]]
     },
     "LLM Chat Completion": {
-      "main": [
-        [
-          {
-            "node": "Build Response",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Build Upsert After LLM", "type": "main", "index": 0 }]]
+    },
+    "Build Upsert After LLM": {
+      "main": [[{ "node": "Upsert Memory", "type": "main", "index": 0 }]]
+    },
+    "Upsert Memory": {
+      "main": [[{ "node": "Build API Response", "type": "main", "index": 0 }]]
+    },
+    "Build API Response": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
     }
   },
   "settings": {
@@ -154,6 +212,6 @@
   },
   "pinData": {},
   "active": false,
-  "versionId": "1",
+  "versionId": "2",
   "id": "assistant_chat_llm"
 }
