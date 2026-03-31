@@ -1,0 +1,159 @@
+{
+  "name": "Bot Showcase - Assistant Chat (Webhook + LLM + Qdrant)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "assistant-chat-v1",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "0af7f353-f6b1-4765-bfa6-afac0bcc40b6",
+      "id": "Webhook_assistant",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        140,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "user_id",
+              "value": "={{$json.body?.user_id || $json.user_id || 'demo-user'}}"
+            },
+            {
+              "name": "message",
+              "value": "={{$json.body?.message || $json.message || 'Привет'}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "Set_assistant_input",
+      "name": "Normalize Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        380,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const llmBody = {\n  model: $env.OPENAI_MODEL || 'gpt-4o-mini',\n  temperature: 0.4,\n  messages: [\n    {\n      role: 'system',\n      content: 'Ты полезный и короткий ассистент для фриланс-бота. Отвечай на русском, конкретно и по делу.'\n    },\n    {\n      role: 'user',\n      content: String($json.message || '')\n    }\n  ]\n};\n\nreturn [{\n  json: {\n    ...$json,\n    llmBodyString: JSON.stringify(llmBody)\n  }\n}];"
+      },
+      "id": "Fn_build",
+      "name": "Build LLM Body",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        640,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{($env.OPENAI_BASE_URL || 'https://api.openai.com/v1') + '/chat/completions'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.OPENAI_API_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json.llmBodyString}}",
+        "options": {}
+      },
+      "continueOnFail": true,
+      "id": "HTTP_llm",
+      "name": "LLM Chat Completion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const llm = $json;\nconst content = llm?.choices?.[0]?.message?.content || llm?.error?.message || 'Извини, не удалось получить ответ от модели.';\n\nreturn [{\n  json: {\n    status: 'ok',\n    user_id: $items('Normalize Input', 0, 0)?.[0]?.json?.user_id || null,\n    input_message: $items('Normalize Input', 0, 0)?.[0]?.json?.message || null,\n    assistant_reply: content,\n    model: llm?.model || ($env.OPENAI_MODEL || 'unknown')\n  }\n}];"
+      },
+      "id": "Fn_response",
+      "name": "Build Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1140,
+        260
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Input": {
+      "main": [
+        [
+          {
+            "node": "Build LLM Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build LLM Body": {
+      "main": [
+        [
+          {
+            "node": "LLM Chat Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Chat Completion": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "active": false,
+  "versionId": "1",
+  "id": "assistant_chat_llm"
+}
