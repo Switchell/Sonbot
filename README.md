@@ -55,6 +55,8 @@ Compose project name: `sonbot` (изолирован от других Docker-п
 
 Скрипт делает `git pull`, копирует JSON в контейнер `sonbot-n8n-*`, импортирует основной workflow и перезапускает n8n.
 
+Если в интерфейсе n8n остался старый «Memory Demo» (уже удалён из Git), можно **один раз** вычистить его из SQLite по инструкции в `scripts/delete_bot_memory_demo.sql` (перед этим останови `sonbot-n8n-1`).
+
 ## Demo workflow (для витрины)
 
 - LLM workflow JSON: `workflows/assistant_chat_llm.workflow.json`
