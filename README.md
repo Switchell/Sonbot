@@ -45,6 +45,16 @@ Compose project name: `sonbot` (изолирован от других Docker-п
 .\down.ps1
 ```
 
+### Восстановить workflow из Git в n8n (после чистой БД / «пустой» витрины)
+
+Из папки `scripts`:
+
+```powershell
+.\restore-workflows.ps1
+```
+
+Скрипт делает `git pull`, копирует JSON в контейнер `sonbot-n8n-*`, импортирует через `n8n import:workflow`, включает оба workflow и перезапускает n8n.
+
 ## Demo workflow (для витрины)
 
 - Workflow JSON: `workflows/bot_memory_demo.workflow.json`
