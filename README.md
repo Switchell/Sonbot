@@ -1,5 +1,7 @@
 # SonBot — showcase: n8n + Qdrant + LLM (Docker)
 
+Репозиторий на GitHub: **[Switchell/n8n-qdrant-assistant-demo](https://github.com/Switchell/n8n-qdrant-assistant-demo)** *(ранее `bot-showcase-n8n-qdrant`)*.
+
 **RU:** локальный стенд «ассистент с памятью» для демо и доработок. **EN:** self‑hosted **n8n** orchestration, **Qdrant** vector memory, OpenAI‑compatible chat, one **`docker compose`** stack.
 
 [![Docker Compose](https://img.shields.io/badge/stack-Docker%20Compose-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
