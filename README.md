@@ -1,101 +1,86 @@
-# SonBot (n8n + Qdrant)
+# SonBot — showcase: n8n + Qdrant + LLM (Docker)
 
-Локальный проект **SonBot** для запуска n8n и Qdrant в отдельном Docker Compose‑неймспейсе.
+**RU:** локальный стенд «ассистент с памятью» для демо и доработок. **EN:** self‑hosted **n8n** orchestration, **Qdrant** vector memory, OpenAI‑compatible chat, one **`docker compose`** stack.
 
-## Что поднимается
+[![Docker Compose](https://img.shields.io/badge/stack-Docker%20Compose-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
+[![n8n](https://img.shields.io/badge/orchestration-n8n-EA4B71?logo=n8n&logoColor=white)](https://n8n.io/)
+[![Qdrant](https://img.shields.io/badge/vectors-Qdrant-DC244C)](https://qdrant.tech/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-- `n8n` на `http://localhost:5678`
-- `qdrant` на `http://localhost:6333`
+## Что внутри
 
-Compose project name: `sonbot` (изолирован от других Docker-проектов).
+Цепочка **вебхук → нормализация входа → поиск в Qdrant (`bot_memory`) → LLM с контекстом → запись диалога в Qdrant → JSON‑ответ** (режим *Respond to Webhook* в n8n).
 
-Если раньше проект поднимался как `bot_showcase`, Docker создаст **новые** тома для `sonbot`; данные из старых томов не подтянутся автоматически. Либо переименуй проект обратно в compose, либо перенеси данные вручную при необходимости.
-
-## Подготовка
-
-1. Убедись, что Docker Desktop запущен.
-2. Проверь наличие `google-creds.json` в корне репозитория SonBot.
-3. Проверь `.env` (пример в `.env.example`).
-
-## Быстрый запуск
-
-Из папки `scripts` в корне репозитория:
-
-```powershell
-.\up.ps1
+```mermaid
+flowchart LR
+  A[HTTP POST] --> n8n[n8n workflow]
+  n8n --> Q[(Qdrant\nbot_memory)]
+  n8n --> L[OpenAI-compatible\n/chat/completions]
+  L --> n8n
+  n8n --> Q
+  n8n --> R[JSON response]
 ```
 
-## Проверка здоровья сервисов
-
-```powershell
-.\health.ps1
-```
-
-Ожидается:
-- `n8n: OK (200)`
-- `qdrant: OK (200)`
-
-## Полезные команды
-
-```powershell
-.\status.ps1
-.\logs.ps1
-.\logs.ps1 n8n
-.\logs.ps1 qdrant
-.\down.ps1
-```
-
-### Восстановить workflow из Git в n8n (после чистой БД / «пустой» витрины)
-
-Из папки `scripts`:
-
-```powershell
-.\restore-workflows.ps1
-```
-
-Скрипт делает `git pull`, копирует JSON в контейнер `sonbot-n8n-*`, импортирует основной workflow и перезапускает n8n.
-
-Если в интерфейсе n8n остался старый «Memory Demo» (уже удалён из Git), можно **один раз** вычистить его из SQLite по инструкции в `scripts/delete_bot_memory_demo.sql` (перед этим останови `sonbot-n8n-1`).
-
-## Demo workflow (для витрины)
-
-- LLM workflow JSON: `workflows/assistant_chat_llm.workflow.json`
-- Пример запроса: `samples/webhook_request.json`
-- Пошаговая проверка: `DEMO_CHECKLIST.md`
-
-### Assistant Chat (витринный сценарий)
-
-Файл: `workflows/assistant_chat_llm.workflow.json`
-
-Цепочка: **вебхук → нормализация → поиск в Qdrant (`bot_memory`) → LLM с контекстом из памяти → запись диалога в Qdrant → JSON-ответ** (режим `Respond to Webhook`).
-
-| Шаг | Назначение |
-|-----|------------|
-| Qdrant Search | Вектор как в демо памяти + фильтр по `user_id`; в системный промпт попадают прошлые реплики. |
-| LLM | OpenAI-совместимый `/chat/completions`. |
-| Upsert | В коллекцию пишется пара «сообщение пользователя» + `assistant_reply`. |
-
-**Тело запроса:**
+Тело запроса (пример):
 
 ```json
 { "user_id": "u1", "message": "Привет" }
 ```
 
-**Ответ в том же HTTP-запросе** (пример полей): `status`, `assistant_reply`, `model`, `used_memory_count`, `latency_ms`, `memory_upsert_ok`.
+Экспорт workflow: [`workflows/assistant_chat_llm.workflow.json`](workflows/assistant_chat_llm.workflow.json). Пример вызова: [`samples/webhook_request.json`](samples/webhook_request.json).
 
-Перед первым запуском ассистента коллекция **`bot_memory`** должна существовать (создай вручную в Qdrant). Если поиск по коллекции недоступен, нода поиска помечена `continueOnFail` — ответ всё равно соберётся, но память будет пустой.
+## Требования
 
-Отладка: **Executions** в n8n — цепочка нод от **Webhook Trigger** до **Build API Response**.
+- Docker Desktop (Windows/macOS/Linux)
+- PowerShell (скрипты в `scripts/`)
 
-**Переменные в `.env` (и в Environment n8n для контейнера):**
+## Быстрый старт
 
-- `OPENAI_API_KEY`
-- `OPENAI_BASE_URL` (например `https://api.openai.com/v1` или ваш совместимый шлюз)
-- `OPENAI_MODEL` (например `gpt-4o-mini`)
+1. Склонировать репозиторий.
+2. Скопировать окружение: скопируйте `.env.example` в `.env`, задайте `N8N_ENCRYPTION_KEY` и `OPENAI_*`.
+3. В корне должен быть файл **`google-creds.json`** (сервисный ключ Google для нод n8n) — он смонтирован в `docker-compose.yml`. Для чистого UI‑демо без Google допустима заглушка вроде `{}` в файле; при ошибках монтирования проверьте путь и права.
+4. Из каталога **`scripts`**:
+   - `.\up.ps1` — поднять стек (`sonbot`: n8n на **http://localhost:5678**, Qdrant на **http://localhost:6333**).
+   - `.\health.ps1` — проверка `n8n` и `qdrant`.
+5. Импорт workflow в пустую n8n: `.\restore-workflows.ps1` или ручной импорт JSON из `workflows/`.
 
-Шаблон текста для карточки Kwork: `KWORK_OFFERING.md`. Пошаговая проверка: `DEMO_CHECKLIST.md`.
+Перед первым запуском в Qdrant должна существовать коллекция **`bot_memory`** (создаётся вручную в UI Qdrant). Чеклист демо: [`DEMO_CHECKLIST.md`](DEMO_CHECKLIST.md). Дорожная карта бота: [`ROADMAP_BOT.md`](ROADMAP_BOT.md).
+
+## Полезные команды (PowerShell)
+
+| Скрипт | Действие |
+|--------|----------|
+| `up.ps1` | Запуск compose |
+| `down.ps1` | Остановка |
+| `status.ps1` | Статус контейнеров |
+| `logs.ps1` [сервис] | Логи |
+| `restore-workflows.ps1` | Подтянуть workflow из Git в n8n |
+
+Compose project name: **`sonbot`** — отдельные тома; при смене имени проекта данные старых томов сами не подтянутся.
+
+## Структура репозитория
+
+| Путь | Назначение |
+|------|------------|
+| `docker-compose.yml` | Сервисы `n8n`, `qdrant`, volumes |
+| `workflows/` | Экспорт витринных workflow (JSON) |
+| `scripts/` | Операции жизненного цикла под Windows |
+| `samples/` | Примеры запросов к вебхуку |
 
 ## Безопасность
 
-- В `.gitignore` уже добавлены: `.env`, `google-creds.json`.
-- Не публикуй `google-creds.json` и `.env` в репозитории/архивах.
+В `.gitignore`: `.env`, `google-creds.json`. Не публикуйте ключи и токены в issue/архивах.
+
+Краткий текст для карточки услуги (Kwork и т.п.): [`KWORK_OFFERING.md`](KWORK_OFFERING.md).
+
+## Описание для GitHub (About)
+
+Скопируйте в поле *Description* репозитория:
+
+`n8n + Qdrant + OpenAI-compatible LLM in Docker — webhook assistant with vector memory (demo workflow included).`
+
+**Topics (теги):** `n8n`, `qdrant`, `docker`, `docker-compose`, `llm`, `vector-database`, `automation`, `webhook`, `openai-api`.
+
+## Лицензия
+
+[MIT](LICENSE).

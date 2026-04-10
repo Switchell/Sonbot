@@ -1,0 +1,2 @@
+# Treat helper scripts as vendored so linguist highlights workflows / compose
+scripts/** linguist-vendored
